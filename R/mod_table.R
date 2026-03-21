@@ -619,8 +619,311 @@ mod_table_server <- function(id, row_variable_value,
       values = table_values,
       valid = reactive(iv$is_valid())
     )
-    
+
   })
-    
+
+}
+
+#' Schema-driven table server module
+#'
+#' @param id Module ID (must match the table_id used in render_array_table)
+#' @param array_prop_name The property name of the array in the schema
+#' @param desc The property descriptor for the array
+#' @param schema The loaded schema
+#' @param language Reactive language value
+#' @param override_values ReactiveVal for setting table values
+#' @param parent_input The parent module's input
+#' @param parent_iv The parent module's InputValidator
+#' @param parent_ns The parent module's namespace function
+#'
+#' @return A list with values() and valid() reactives
+#' @import shinyvalidate
+#' @noRd
+mod_table_server_schema <- function(id, array_prop_name, desc, schema,
+                                     language, override_values,
+                                     parent_input, parent_iv, parent_ns) {
+
+  stopifnot(is.reactive(language))
+  stopifnot(is.reactive(override_values))
+
+  moduleServer(id, function(input, output, session) {
+    ns <- session$ns
+
+    columns <- desc$array_columns
+    if (is.null(columns)) return(list(values = reactiveVal(list()),
+                                       valid = reactive(TRUE)))
+
+    column_names <- names(columns)
+
+    iv <- InputValidator$new()
+    iv$enable()
+    rules_added <- NULL
+
+    add_schema_validation_rules <- function(widgets, variables) {
+      lapply(seq_along(widgets), FUN = function(i) {
+        widget_name <- widgets[i]
+        col_desc <- columns[[variables[i]]]
+
+        if (widget_name %in% rules_added) return()
+
+        if (isTRUE(col_desc$required)) {
+          iv$add_rule(widget_name, sv_required(message = ""))
+        }
+        if (!is.null(col_desc$minimum)) {
+          iv$add_rule(widget_name, sv_gte(col_desc$minimum, allow_na = TRUE,
+                                           message_fmt = ""))
+        }
+        if (!is.null(col_desc$maximum)) {
+          iv$add_rule(widget_name, sv_lte(col_desc$maximum, allow_na = TRUE,
+                                           message_fmt = ""))
+        }
+        if (isTRUE(col_desc$is_integer)) {
+          iv$add_rule(widget_name, function(value) {
+            if (is.null(value) || is.na(value)) return(NULL)
+            if (value != floor(value)) return("")
+            NULL
+          })
+        }
+      })
+      rules_added <<- c(rules_added, widgets)
+    }
+
+    n_cols <- length(column_names)
+    old_values <- reactiveVal()
+    table_values <- reactiveVal()
+    rendered <- reactiveVal(FALSE)
+    dynamic_rows <- reactiveVal()
+
+    observeEvent(input$rendered, { rendered(TRUE) })
+
+    visible <- reactive({
+      rows <- dynamic_rows()
+      !is.null(rows) && length(rows) > 0
+    })
+
+    observeEvent(visible(), ignoreNULL = FALSE, ignoreInit = TRUE,
+                 priority = 1, {
+      if (!visible()) {
+        rendered(FALSE)
+        old_values(list())
+      }
+    })
+
+    override_trigger <- reactiveVal(0)
+    row_trigger <- reactiveVal(0)
+
+    observeEvent(override_values(), {
+      values <- override_values()
+      if (is.null(values)) return()
+
+      # Determine rows from the data
+      first_col <- column_names[1]
+      col_data <- values[[first_col]]
+      if (!is.null(col_data) && length(col_data) > 0) {
+        dynamic_rows(seq_along(col_data))
+      } else {
+        dynamic_rows(1)
+      }
+      override_trigger(override_trigger() + 1)
+    })
+
+    # Initialize with one row when first accessed (no override data)
+    observe({
+      if (is.null(dynamic_rows())) {
+        dynamic_rows(1L)
+      }
+    }, priority = -1)
+
+    # Add row handler
+    observeEvent(input$add_row, {
+      current <- dynamic_rows()
+      if (is.null(current) || length(current) == 0) {
+        dynamic_rows(1L)
+      } else {
+        dynamic_rows(seq_len(length(current) + 1L))
+      }
+      row_trigger(row_trigger() + 1)
+    })
+
+    # Remove last row handler (keep at least 1)
+    observeEvent(input$remove_row, {
+      current <- dynamic_rows()
+      if (is.null(current) || length(current) <= 1) return()
+      dynamic_rows(seq_len(length(current) - 1L))
+      row_trigger(row_trigger() + 1)
+    })
+
+    # Update button labels on language change
+    observeEvent(language(), {
+      iso <- lang_to_iso(language())
+      add_label <- if (iso == "fi") "Lis\u00e4\u00e4 rivi" else if (iso == "sv") "L\u00e4gg till rad" else "Add row"
+      remove_label <- if (iso == "fi") "Poista viimeinen rivi" else if (iso == "sv") "Ta bort sista raden" else "Remove last row"
+      updateActionButton(session, "add_row", label = add_label)
+      updateActionButton(session, "remove_row", label = remove_label)
+    })
+
+    # Unbind before re-render
+    observe(priority = 2, {
+      language()
+      visible()
+      row_trigger()
+      override_trigger()
+      req(isolate(rendered()))
+      session$sendCustomMessage("unbind-table", ns("table"))
+    })
+
+    block_sum_calculation <- reactiveVal(FALSE)
+
+    table_data <- reactive({
+      override_trigger()
+      row_trigger()
+
+      iso <- lang_to_iso(language())
+      override_vals <- isolate(override_values())
+      do_override <- !is.null(override_vals)
+
+      table_to_display <- data.frame(matrix(nrow = 0, ncol = n_cols))
+      names(table_to_display) <- column_names
+
+      if (do_override && identical(override_vals, list())) {
+        override_values(NULL)
+        do_override <- FALSE
+        old_values(list())
+      }
+
+      rows <- isolate(dynamic_rows())
+      if (is.null(rows) || length(rows) == 0) rows <- integer(0)
+
+      current_row <- 1
+      for (row_idx in rows) {
+        for (variable in column_names) {
+          col_desc <- columns[[variable]]
+          code_name <- paste(variable, current_row, sep = "_")
+
+          value <- if (do_override) {
+            override_vals[[variable]][row_idx]
+          } else {
+            old_row_number <- which(
+              isolate(old_values())[["DYNAMIC_ROWS"]] == rows[current_row])
+            isolate(old_values())[[variable]][old_row_number]
+          }
+
+          if (!isTruthy(value) || identical(value, missingval)) value <- ""
+
+          choices <- NULL
+          if (identical(col_desc$type, "selectInput")) {
+            choices <- schema_get_choices(col_desc$choices, iso)
+          }
+
+          placeholder <- NULL
+          if (!is.null(col_desc$placeholders)) {
+            placeholder <- schema_get_title(col_desc$placeholders, iso, "")
+          }
+
+          width <- if (col_desc$type == "numericInput") 100 else 150
+
+          widget <- as.character(
+            render_property_widget(variable, col_desc, ns, iso,
+                                    override_code_name = code_name,
+                                    override_label = "",
+                                    override_value = value,
+                                    override_choices = choices,
+                                    override_selected = value,
+                                    override_placeholder = placeholder,
+                                    width = width))
+
+          add_schema_validation_rules(code_name, variable)
+          table_to_display[current_row, variable] <- widget
+        }
+
+        rownames(table_to_display)[current_row] <- as.character(row_idx)
+        current_row <- current_row + 1
+      }
+
+      block_sum_calculation(TRUE)
+      override_values(NULL)
+      table_to_display
+    })
+
+    output$table <- DT::renderDataTable({
+      req(visible())
+      rendered(FALSE)
+      table_to_display <- table_data()
+
+      if (nrow(table_to_display) == 0) return()
+
+      iso <- lang_to_iso(language())
+      # Use unitless titles or regular titles for column headers
+      col_labels <- vapply(column_names, function(cn) {
+        col_desc <- columns[[cn]]
+        if (!is.null(col_desc$unitless_titles)) {
+          schema_get_title(col_desc$unitless_titles, iso, cn)
+        } else {
+          schema_get_title(col_desc$titles, iso, cn)
+        }
+      }, character(1))
+      names(table_to_display) <- col_labels
+
+      table_to_display <-
+        DT::datatable(
+          table_to_display,
+          escape = FALSE,
+          selection = "none",
+          class = "table table-hover table-condensed",
+          rownames = FALSE,
+          options =
+            list(dom = "t",
+                 ordering = FALSE,
+                 drawCallback = htmlwidgets::JS(js_bind_script),
+                 initComplete =
+                   htmlwidgets::JS(paste0(
+                     "function(settings, json) {",
+                     "do_selectize('", ns("table"), "'); ",
+                     "rendering_done('", ns("rendered"), "'); }"
+                   )),
+                 scrollX = TRUE
+            ))
+      table_to_display
+    }, server = FALSE)
+
+    observe({
+      value_list <- list()
+
+      if (!rendered()) {
+        table_values(value_list)
+        return()
+      }
+
+      table_data()
+
+      rows <- dynamic_rows()
+      if (is.null(rows) || length(rows) == 0) {
+        table_values(value_list)
+        return()
+      }
+
+      row_numbers <- seq_along(rows)
+
+      for (variable in column_names) {
+        values <- NULL
+        for (row_number in row_numbers) {
+          element_name <- paste(variable, row_number, sep = "_")
+          values <- c(values, input[[element_name]])
+        }
+        value_list[[variable]] <- values
+      }
+
+      block_sum_calculation(FALSE)
+      table_values(value_list)
+
+      value_list <- c(value_list, list(DYNAMIC_ROWS = isolate(dynamic_rows())))
+      old_values(value_list)
+    })
+
+    list(
+      values = table_values,
+      valid = reactive(iv$is_valid())
+    )
+  })
 }
 

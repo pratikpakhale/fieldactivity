@@ -7,7 +7,7 @@
 # Define initial credentials (more can be added later through the admin UI)
 credentials <- data.frame(
   user = c("user", "admin"),
-  password = c("User1", "12345"),
+  password = c("user1", "admin1"),
   start = c(NA, NA), # start and expire are optional
   expire = c(NA, NA),
   admin = c(FALSE, TRUE),
@@ -17,6 +17,6 @@ credentials <- data.frame(
 # Create the database
 shinymanager::create_db(
   credentials_data = credentials,
-  sqlite_path = "path/to/database.sqlite", # will be created
-  passphrase = "set_the_passphrase_here"
+  sqlite_path = "data/users.sqlite", # will be created
+  passphrase = "password123"
 )

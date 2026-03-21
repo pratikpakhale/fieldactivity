@@ -17,4 +17,5 @@ file_path <- if (golem::app_dev()) {
 # Run the application
 run_app(json_file_path = file_path, 
         user_db_path = "dev/database.sqlite",
-        user_db_passphrase = "salasana")
+        user_db_passphrase = "salasana",
+        options = list(port = 3839))
