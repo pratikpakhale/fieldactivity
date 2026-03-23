@@ -1,6 +1,15 @@
 # Schema-driven UI renderer
 # Generates Shiny widgets from the parsed management-event schema
 
+#' Create a label with a required asterisk indicator
+#' @param label The label text
+#' @param required Whether the field is required
+#' @return The label, optionally with a red asterisk appended
+make_required_label <- function(label, required) {
+  if (!isTRUE(required) || is.null(label) || identical(label, "")) return(label)
+  tagList(label, tags$span(" *", class = "required-asterisk"))
+}
+
 #' Convert a condition string from schema x-ui format to JavaScript for conditionalPanel
 #' Replaces input.FIELD with input['ns-FIELD'] for namespaced Shiny modules
 #' @param condition The condition string (e.g. "input.organic_material == 'RE003'")
@@ -72,8 +81,10 @@ render_event_panel <- function(event_entry, pr, ns, iso, event_const) {
 #' Render a subtype discriminator and its conditional panels
 render_subtype_section <- function(pn, desc, event_entry, pr, ns, iso, 
                                     event_const) {
-  # Render the discriminator selectInput itself
-  discriminator_widget <- render_property_widget(pn, desc, ns, iso)
+  # Render the discriminator selectInput with subtype choices
+  subtype_choices <- build_subtype_choices(event_entry, iso)
+  discriminator_widget <- render_property_widget(pn, desc, ns, iso,
+                                                  override_choices = subtype_choices)
   
   # Build subtype conditional panels
   subtype_panels <- lapply(names(event_entry$subtypes), function(sub_const) {
@@ -135,9 +146,12 @@ render_property_widget <- function(prop_name, desc, ns, iso,
   label <- if (!is.null(override_label)) {
     override_label
   } else {
-    schema_get_title(desc$titles, iso, prop_name)
+    make_required_label(
+      schema_get_title(desc$titles, iso, prop_name),
+      desc$required
+    )
   }
-  
+
   value <- if (!is.null(override_value)) override_value else ""
   
   placeholder <- if (!is.null(override_placeholder)) {
@@ -230,21 +244,15 @@ render_property_widget <- function(prop_name, desc, ns, iso,
 render_array_table <- function(prop_name, desc, ns, iso) {
   table_id <- paste0(prop_name, "_table")
   table_ns <- NS(ns(table_id))
-  w <- tagList(
+  w <- div(
+    class = "schema-array-table",
     mod_table_ui(ns(table_id)),
-    fluidRow(
-      column(6,
-        actionButton(table_ns("add_row"),
-                     label = "Add row",
-                     icon = icon("plus"),
-                     class = "btn-sm btn-default")
-      ),
-      column(6,
-        actionButton(table_ns("remove_row"),
-                     label = "Remove last row",
-                     icon = icon("minus"),
-                     class = "btn-sm btn-default")
-      )
+    div(
+      class = "schema-array-table__footer",
+      actionButton(table_ns("add_row"),
+                   label = schema_table_add_row_label(iso),
+                   icon = icon("plus"),
+                   class = "btn-sm btn-default")
     )
   )
   # Wrap in conditionalPanel if x-ui condition is defined
@@ -292,7 +300,19 @@ update_schema_labels <- function(session, schema, event_type, subtype,
       desc <- lookup_property(pr, pn, ec)
       if (is.null(desc)) next
       if (desc$type == "const" || desc$type == "dataTable") next
-      update_schema_widget(session, pn, desc, iso, input)
+      # Discriminator needs subtype choices rebuilt for the new language
+      if (isTRUE(desc$is_discriminator) && event_entry$has_subtypes) {
+        sub_choices <- build_subtype_choices(event_entry, iso)
+        current <- input[[pn]]
+        label <- make_required_label(
+          schema_get_title(desc$titles, iso, pn),
+          desc$required
+        )
+        updateSelectInput(session, pn, label = label,
+                          choices = sub_choices, selected = current)
+      } else {
+        update_schema_widget(session, pn, desc, iso, input)
+      }
     }
     
     if (event_entry$has_subtypes) {
@@ -311,7 +331,10 @@ update_schema_labels <- function(session, schema, event_type, subtype,
 
 #' Update a single schema widget's label and choices
 update_schema_widget <- function(session, prop_name, desc, iso, input) {
-  label <- schema_get_title(desc$titles, iso, prop_name)
+  label <- make_required_label(
+    schema_get_title(desc$titles, iso, prop_name),
+    desc$required
+  )
   
   if (desc$type == "selectInput") {
     choices <- schema_get_choices(desc$choices, iso)

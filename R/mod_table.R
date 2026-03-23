@@ -16,6 +16,26 @@ table_log <- FALSE
 # EDIT: this makes sense also, see datatables API documentation for example
 js_bind_script <- "function() { Shiny.bindAll(this.api().table().node()); }"
 
+schema_table_add_row_label <- function(iso) {
+  if (identical(iso, "fi")) {
+    "Lis\u00e4\u00e4 rivi"
+  } else if (identical(iso, "sv")) {
+    "L\u00e4gg till rad"
+  } else {
+    "Add row"
+  }
+}
+
+schema_table_remove_row_label <- function(iso) {
+  if (identical(iso, "fi")) {
+    "Poista rivi"
+  } else if (identical(iso, "sv")) {
+    "Ta bort rad"
+  } else {
+    "Remove row"
+  }
+}
+
 #' Shiny module for data input in table format
 #'
 #' @description A shiny Module.
@@ -654,6 +674,7 @@ mod_table_server_schema <- function(id, array_prop_name, desc, schema,
                                        valid = reactive(TRUE)))
 
     column_names <- names(columns)
+    action_column_name <- "..remove_row.."
 
     iv <- InputValidator$new()
     iv$enable()
@@ -720,9 +741,9 @@ mod_table_server_schema <- function(id, array_prop_name, desc, schema,
       first_col <- column_names[1]
       col_data <- values[[first_col]]
       if (!is.null(col_data) && length(col_data) > 0) {
-        dynamic_rows(seq_along(col_data))
+        dynamic_rows(as.integer(seq_along(col_data)))
       } else {
-        dynamic_rows(1)
+        dynamic_rows(1L)
       }
       override_trigger(override_trigger() + 1)
     })
@@ -740,26 +761,26 @@ mod_table_server_schema <- function(id, array_prop_name, desc, schema,
       if (is.null(current) || length(current) == 0) {
         dynamic_rows(1L)
       } else {
-        dynamic_rows(seq_len(length(current) + 1L))
+        dynamic_rows(c(current, max(current) + 1L))
       }
       row_trigger(row_trigger() + 1)
     })
 
-    # Remove last row handler (keep at least 1)
-    observeEvent(input$remove_row, {
+    # Remove a specific row while keeping stable row ids.
+    observeEvent(input$remove_row_index, {
       current <- dynamic_rows()
+      row_id <- input$remove_row_index
       if (is.null(current) || length(current) <= 1) return()
-      dynamic_rows(seq_len(length(current) - 1L))
+      if (is.null(row_id) || !(row_id %in% current)) return()
+      dynamic_rows(current[current != row_id])
       row_trigger(row_trigger() + 1)
     })
 
     # Update button labels on language change
     observeEvent(language(), {
       iso <- lang_to_iso(language())
-      add_label <- if (iso == "fi") "Lis\u00e4\u00e4 rivi" else if (iso == "sv") "L\u00e4gg till rad" else "Add row"
-      remove_label <- if (iso == "fi") "Poista viimeinen rivi" else if (iso == "sv") "Ta bort sista raden" else "Remove last row"
-      updateActionButton(session, "add_row", label = add_label)
-      updateActionButton(session, "remove_row", label = remove_label)
+      updateActionButton(session, "add_row",
+                         label = schema_table_add_row_label(iso))
     })
 
     # Unbind before re-render
@@ -782,8 +803,11 @@ mod_table_server_schema <- function(id, array_prop_name, desc, schema,
       override_vals <- isolate(override_values())
       do_override <- !is.null(override_vals)
 
-      table_to_display <- data.frame(matrix(nrow = 0, ncol = n_cols))
-      names(table_to_display) <- column_names
+      table_to_display <- data.frame(
+        matrix("", nrow = 0, ncol = n_cols + 1L),
+        stringsAsFactors = FALSE
+      )
+      names(table_to_display) <- c(column_names, action_column_name)
 
       if (do_override && identical(override_vals, list())) {
         override_values(NULL)
@@ -793,6 +817,7 @@ mod_table_server_schema <- function(id, array_prop_name, desc, schema,
 
       rows <- isolate(dynamic_rows())
       if (is.null(rows) || length(rows) == 0) rows <- integer(0)
+      can_remove_rows <- length(rows) > 1L
 
       current_row <- 1
       for (row_idx in rows) {
@@ -820,7 +845,7 @@ mod_table_server_schema <- function(id, array_prop_name, desc, schema,
             placeholder <- schema_get_title(col_desc$placeholders, iso, "")
           }
 
-          width <- if (col_desc$type == "numericInput") 100 else 150
+          width <- if (col_desc$type == "numericInput") 100 else NULL
 
           widget <- as.character(
             render_property_widget(variable, col_desc, ns, iso,
@@ -835,6 +860,23 @@ mod_table_server_schema <- function(id, array_prop_name, desc, schema,
           add_schema_validation_rules(code_name, variable)
           table_to_display[current_row, variable] <- widget
         }
+
+        remove_button <- as.character(
+          tags$button(
+            type = "button",
+            class = "btn btn-default btn-sm schema-array-table__remove-row",
+            title = schema_table_remove_row_label(iso),
+            `aria-label` = schema_table_remove_row_label(iso),
+            onclick = sprintf(
+              "Shiny.setInputValue('%s', %d, {priority: 'event'})",
+              ns("remove_row_index"),
+              row_idx
+            ),
+            disabled = if (!can_remove_rows) "disabled" else NULL,
+            icon("trash")
+          )
+        )
+        table_to_display[current_row, action_column_name] <- remove_button
 
         rownames(table_to_display)[current_row] <- as.character(row_idx)
         current_row <- current_row + 1
@@ -862,18 +904,19 @@ mod_table_server_schema <- function(id, array_prop_name, desc, schema,
           schema_get_title(col_desc$titles, iso, cn)
         }
       }, character(1))
-      names(table_to_display) <- col_labels
+      names(table_to_display) <- c(col_labels, "")
 
       table_to_display <-
         DT::datatable(
           table_to_display,
           escape = FALSE,
           selection = "none",
-          class = "table table-hover table-condensed",
+          class = "table table-hover",
           rownames = FALSE,
           options =
             list(dom = "t",
                  ordering = FALSE,
+                 autoWidth = FALSE,
                  drawCallback = htmlwidgets::JS(js_bind_script),
                  initComplete =
                    htmlwidgets::JS(paste0(
@@ -881,7 +924,14 @@ mod_table_server_schema <- function(id, array_prop_name, desc, schema,
                      "do_selectize('", ns("table"), "'); ",
                      "rendering_done('", ns("rendered"), "'); }"
                    )),
-                 scrollX = TRUE
+                 columnDefs = list(
+                   list(
+                     orderable = FALSE,
+                     targets = ncol(table_to_display) - 1L,
+                     className = "schema-array-table__actions-cell",
+                     width = "1%"
+                   )
+                 )
             ))
       table_to_display
     }, server = FALSE)
@@ -926,4 +976,3 @@ mod_table_server_schema <- function(id, array_prop_name, desc, schema,
     )
   })
 }
-

@@ -226,11 +226,12 @@ mod_form_server <- function(id, site, set_values, reset_values, edit_mode,
         }
       }
       
-      # Handle array/table data
-      for (prop_name in relevant$event_props) {
-        desc <- find_property_desc_for_event(pr, prop_name, 
+      # Handle array/table data (event-level and subtype-level)
+      subtype_val <- get_subtype_value(values, er)
+      for (prop_name in c(relevant$event_props, relevant$subtype_props)) {
+        desc <- find_property_desc_for_event(pr, prop_name,
                                               values$mgmt_operations_event,
-                                              NULL)
+                                              subtype_val)
         if (!is.null(desc) && desc$type == "dataTable") {
           table_name <- paste0(prop_name, "_table")
           if (!is.null(tables[[table_name]])) {
@@ -431,17 +432,36 @@ mod_form_server <- function(id, site, set_values, reset_values, edit_mode,
       for (tn in schema_table_names) {
         # Find the array property this table corresponds to
         array_prop_name <- sub("_table$", "", tn)
-        # Find which event this belongs to
+        # Find which event/subtype this belongs to
+        found <- FALSE
         for (ec in names(er)) {
+          # Check event-level properties
           desc <- lookup_property(pr, array_prop_name, ec)
           if (!is.null(desc) && desc$type == "dataTable") {
-            tables[[tn]]$result <<- 
+            tables[[tn]]$result <<-
               mod_table_server_schema(tn, array_prop_name, desc, schema,
                                       language,
                                       tables[[tn]]$set_values,
                                       input, main_iv, ns)
+            found <- TRUE
             break
           }
+          # Check subtype-level properties
+          if (er[[ec]]$has_subtypes) {
+            for (sc in names(er[[ec]]$subtypes)) {
+              desc <- lookup_property(pr, array_prop_name, ec, sc)
+              if (!is.null(desc) && desc$type == "dataTable") {
+                tables[[tn]]$result <<-
+                  mod_table_server_schema(tn, array_prop_name, desc, schema,
+                                          language,
+                                          tables[[tn]]$set_values,
+                                          input, main_iv, ns)
+                found <- TRUE
+                break
+              }
+            }
+          }
+          if (found) break
         }
       }
       
@@ -463,8 +483,16 @@ mod_form_server <- function(id, site, set_values, reset_values, edit_mode,
       event_entry <- er[[event_type]]
       if (is.null(event_entry)) return()
 
-      for (pn in event_entry$property_names) {
-        desc <- lookup_property(pr, pn, event_type)
+      # Collect all property names including subtypes
+      subtype <- get_current_subtype(input, er)
+      all_props <- event_entry$property_names
+      if (event_entry$has_subtypes && !is.null(subtype) &&
+          !is.null(event_entry$subtypes[[subtype]])) {
+        all_props <- c(all_props, event_entry$subtypes[[subtype]]$property_names)
+      }
+
+      for (pn in all_props) {
+        desc <- lookup_property(pr, pn, event_type, subtype)
         if (is.null(desc) || is.null(desc$total_of)) next
 
         list_name <- desc$total_of$list_name
@@ -695,10 +723,22 @@ get_schema_table_names <- function(schema) {
   pr <- schema$property_registry
   table_names <- character(0)
   for (ec in names(er)) {
-    for (pn in er[[ec]]$property_names) {
+    event_entry <- er[[ec]]
+    for (pn in event_entry$property_names) {
       desc <- lookup_property(pr, pn, ec)
       if (!is.null(desc) && desc$type == "dataTable") {
         table_names <- c(table_names, paste0(pn, "_table"))
+      }
+    }
+    # Also check subtype properties (e.g. soil_layer_list in observation_type_soil)
+    if (event_entry$has_subtypes) {
+      for (sc in names(event_entry$subtypes)) {
+        for (spn in event_entry$subtypes[[sc]]$property_names) {
+          sdesc <- lookup_property(pr, spn, ec, sc)
+          if (!is.null(sdesc) && sdesc$type == "dataTable") {
+            table_names <- c(table_names, paste0(spn, "_table"))
+          }
+        }
       }
     }
   }

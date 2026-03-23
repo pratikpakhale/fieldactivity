@@ -407,10 +407,14 @@ schema_get_title <- function(titles, language = "en", fallback = "") {
   if (is.null(titles)) return(fallback)
   lang_key <- language
   result <- titles[[lang_key]]
-  if (!is.null(result) && nchar(result) > 0) return(result)
+  if (!is.null(result) && nchar(result) > 0) {
+    return(tools::toTitleCase(result))
+  }
   # fallback to English
   result <- titles[["en"]]
-  if (!is.null(result) && nchar(result) > 0) return(result)
+  if (!is.null(result) && nchar(result) > 0) {
+    return(tools::toTitleCase(result))
+  }
   fallback
 }
 
