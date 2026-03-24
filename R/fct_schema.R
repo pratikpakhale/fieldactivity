@@ -216,7 +216,6 @@ resolve_ref <- function(obj, defs) {
   target
 }
 
-#' Merge two lists, with later values overriding earlier ones
 merge_lists <- function(a, b) {
   for (k in names(b)) {
     a[[k]] <- b[[k]]
@@ -224,9 +223,6 @@ merge_lists <- function(a, b) {
   a
 }
 
-#' Extract multilingual titles from a schema node
-#' @param node A schema node (event def, property, oneOf entry)
-#' @return A named list with keys: en, fi, sv
 extract_titles <- function(node) {
   list(
     en = node$title %||% "",
@@ -241,7 +237,6 @@ extract_titles <- function(node) {
 determine_widget_type <- function(prop) {
   xui <- prop[["x-ui"]]
   
-  # x-ui form-type override
   if (!is.null(xui[["form-type"]])) {
     return(xui[["form-type"]])
   }
@@ -253,31 +248,18 @@ determine_widget_type <- function(prop) {
   
   prop_type <- prop$type
   
-  # Array of objects -> dynamic table
-  if (identical(prop_type, "array") && 
+  if (identical(prop_type, "array") &&
       !is.null(prop$items) && identical(prop$items$type, "object")) {
     return("dataTable")
   }
   
-  # String types
   if (identical(prop_type, "string")) {
-    # Has oneOf choices -> selectInput
-    if (!is.null(prop$oneOf) && length(prop$oneOf) > 0) {
-      return("selectInput")
-    }
-    # Is a discriminator
-    if (!is.null(xui) && identical(xui$discriminator, TRUE)) {
-      return("selectInput")
-    }
-    # Date format
-    if (identical(prop$format, "date")) {
-      return("dateInput")
-    }
-    # Default string
+    if (!is.null(prop$oneOf) && length(prop$oneOf) > 0) return("selectInput")
+    if (!is.null(xui) && identical(xui$discriminator, TRUE)) return("selectInput")
+    if (identical(prop$format, "date")) return("dateInput")
     return("textInput")
   }
-  
-  # Number type
+
   if (identical(prop_type, "number") || identical(prop_type, "integer")) {
     return("numericInput")
   }
@@ -297,13 +279,11 @@ build_property_descriptor <- function(name, prop, required, event_type,
   xui <- prop[["x-ui"]]
   widget_type <- determine_widget_type(prop)
   
-  # Extract choices from oneOf
   choices <- NULL
   if (widget_type == "selectInput" && !is.null(prop$oneOf)) {
     choices <- extract_oneof_choices(prop$oneOf)
   }
   
-  # Extract array item info
   array_columns <- NULL
   array_items_required <- NULL
   if (widget_type == "dataTable" && !is.null(prop$items$properties)) {
@@ -407,14 +387,10 @@ schema_get_title <- function(titles, language = "en", fallback = "") {
   if (is.null(titles)) return(fallback)
   lang_key <- language
   result <- titles[[lang_key]]
-  if (!is.null(result) && nchar(result) > 0) {
-    return(tools::toTitleCase(result))
-  }
+  if (!is.null(result) && nchar(result) > 0) return(result)
   # fallback to English
   result <- titles[["en"]]
-  if (!is.null(result) && nchar(result) > 0) {
-    return(tools::toTitleCase(result))
-  }
+  if (!is.null(result) && nchar(result) > 0) return(result)
   fallback
 }
 

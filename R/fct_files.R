@@ -9,7 +9,7 @@ json_file_base_folder <- function() golem::get_golem_options("json_file_path")
 schema_url <- "https://raw.githubusercontent.com/hamk-uas/fieldobservatory-data-schemas/main/management-event.schema.json"
 
 # Legacy property name mapping for backward-compatible reading
-legacy_read_map <- c(
+legacy_name_map <- c(
   "mgmt_event_notes" = "mgmt_event_short_notes",
   "planting_notes" = "mgmt_event_long_notes",
   "harvest_comments" = "mgmt_event_long_notes",
@@ -163,8 +163,8 @@ read_json_file <- function(site, block,
 #' @param event An event list
 #' @return The event with legacy names mapped to schema names
 normalize_legacy_event <- function(event) {
-  for (old_name in names(legacy_read_map)) {
-    new_name <- legacy_read_map[[old_name]]
+  for (old_name in names(legacy_name_map)) {
+    new_name <- legacy_name_map[[old_name]]
     if (!is.null(event[[old_name]]) && is.null(event[[new_name]])) {
       event[[new_name]] <- event[[old_name]]
       event[[old_name]] <- NULL

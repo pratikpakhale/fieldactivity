@@ -288,12 +288,13 @@ mod_event_list_server <- function(id, events, language, site) {
       # filter by activity type
       if (input$event_list_activity_filter != "activity_choice_all") {
         event_list <- rlapply(event_list, fun = function(x)
-          if (x$mgmt_operations_event == input$event_list_activity_filter) {x})
+          if (!is.null(x$mgmt_operations_event) && x$mgmt_operations_event == input$event_list_activity_filter) {x})
       }
-      
+
       # filter by year
       if (input$event_list_year_filter != "year_choice_all") {
         event_list <- rlapply(event_list, fun = function(x) {
+          if (is.null(x$date)) return(NULL)
           event_year <- format(as.Date(x$date, date_format_json), "%Y")
           if (event_year == input$event_list_year_filter) {x}
         })

@@ -101,7 +101,6 @@ render_subtype_section <- function(pn, desc, event_entry, pr, ns, iso,
       } else {
         sw <- render_property_widget(spn, sdesc, ns, iso)
       }
-      # Wrap in conditionalPanel if x-ui condition is defined
       if (!is.null(sdesc$xui$condition)) {
         sw <- conditionalPanel(
           condition = convert_condition_to_js(sdesc$xui$condition, ns), sw)
@@ -255,7 +254,6 @@ render_array_table <- function(prop_name, desc, ns, iso) {
                    class = "btn-sm btn-default")
     )
   )
-  # Wrap in conditionalPanel if x-ui condition is defined
   if (!is.null(desc$xui$condition)) {
     w <- conditionalPanel(
       condition = convert_condition_to_js(desc$xui$condition, ns), w)

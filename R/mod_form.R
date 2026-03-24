@@ -37,7 +37,6 @@ mod_form_ui <- function(id){
                                                             init_lang),
                          choices = ""),
              
-             # Event type selector driven by schema
              selectInput(ns("mgmt_operations_event"), 
                          label = schema_get_title(
                            lookup_property(mgmt_schema$property_registry, 
@@ -46,7 +45,6 @@ mod_form_ui <- function(id){
                          choices = build_event_type_choices(mgmt_schema, iso)
              ),
              
-             # Date input from schema
              dateInput(
                ns("date"),
                format = "dd/mm/yyyy",
@@ -58,7 +56,6 @@ mod_form_ui <- function(id){
                weekstart = 1
              ),
              
-             # Short notes from schema
              textAreaInput(
                ns("mgmt_event_short_notes"),
                label = schema_get_title(
@@ -125,7 +122,6 @@ mod_form_server <- function(id, site, set_values, reset_values, edit_mode,
     er <- schema$event_registry
     pr <- schema$property_registry
     
-    # Schema-based validation
     main_iv <- InputValidator$new()
     
     all_props <- get_all_schema_properties(schema)
@@ -204,9 +200,8 @@ mod_form_server <- function(id, site, set_values, reset_values, edit_mode,
         get_subtype_value(values, er)
       )
       
-      # Populate widgets
       for (prop_name in relevant$all) {
-        desc <- find_property_desc_for_event(
+        desc <- lookup_property(
           pr, prop_name, 
           values$mgmt_operations_event, 
           get_subtype_value(values, er))
@@ -229,7 +224,7 @@ mod_form_server <- function(id, site, set_values, reset_values, edit_mode,
       # Handle array/table data (event-level and subtype-level)
       subtype_val <- get_subtype_value(values, er)
       for (prop_name in c(relevant$event_props, relevant$subtype_props)) {
-        desc <- find_property_desc_for_event(pr, prop_name,
+        desc <- lookup_property(pr, prop_name,
                                               values$mgmt_operations_event,
                                               subtype_val)
         if (!is.null(desc) && desc$type == "dataTable") {
@@ -515,13 +510,11 @@ mod_form_server <- function(id, site, set_values, reset_values, edit_mode,
       }
     })
 
-    # Prepare form data for save
     form_data <- reactive({
       if (dp()) message("Calculating form data")
       
       relevant <- relevant_variables()
       
-      # Check table validity
       relevant_table <- NULL
       if (length(relevant$table_name) > 0 && !is.null(tables[[relevant$table_name]])) {
         relevant_table <- tables[[relevant$table_name]]$result
@@ -534,7 +527,6 @@ mod_form_server <- function(id, site, set_values, reset_values, edit_mode,
       
       event <- list()
       
-      # Collect common properties
       event$mgmt_operations_event <- input[["mgmt_operations_event"]]
       event$date <- tryCatch(
         format(input[["date"]], date_format_json),
@@ -543,12 +535,11 @@ mod_form_server <- function(id, site, set_values, reset_values, edit_mode,
       event$mgmt_event_short_notes <- trimws(input[["mgmt_event_short_notes"]] %||% "")
       event$block <- input[["block"]]
       
-      # Collect event-specific properties
       for (prop_name in relevant$regular) {
         if (prop_name %in% c("mgmt_operations_event", "date", 
                               "mgmt_event_short_notes", "block")) next
         
-        desc <- find_property_desc_for_event(
+        desc <- lookup_property(
           pr, prop_name, 
           input[["mgmt_operations_event"]],
           get_current_subtype(input, er))
@@ -583,7 +574,6 @@ mod_form_server <- function(id, site, set_values, reset_values, edit_mode,
         event[[prop_name]] <- value
       }
       
-      # Collect table data
       if (!is.null(relevant_table)) {
         table_values <- relevant_table$values()
         for (vn in names(table_values)) {
@@ -608,7 +598,6 @@ mod_form_server <- function(id, site, set_values, reset_values, edit_mode,
       event
     })
     
-    # Calculate relevant variables
     relevant_variables <- reactive({
       if (dp()) message("Calculating relevant variables")
       
@@ -627,13 +616,12 @@ mod_form_server <- function(id, site, set_values, reset_values, edit_mode,
       subtype <- get_current_subtype(input, er)
       relevant <- get_relevant_properties(schema, event_type, subtype)
       
-      # Separate regular and table properties
       regular_props <- character(0)
       table_props <- character(0)
       table_name <- character(0)
       
       for (pn in relevant$all) {
-        desc <- find_property_desc_for_event(pr, pn, event_type, subtype)
+        desc <- lookup_property(pr, pn, event_type, subtype)
         if (is.null(desc)) next
         if (desc$type == "const") next
         
@@ -688,11 +676,6 @@ find_any_property_desc <- function(pr, prop_name) {
   NULL
 }
 
-# Helper: find property descriptor for a specific event/subtype
-find_property_desc_for_event <- function(pr, prop_name, event_type, subtype) {
-  lookup_property(pr, prop_name, event_type, subtype)
-}
-
 # Helper: get the current subtype from input
 get_current_subtype <- function(input, er) {
   event_type <- input[["mgmt_operations_event"]]
@@ -745,17 +728,6 @@ get_schema_table_names <- function(schema) {
   unique(table_names)
 }
 
-# Legacy property name mapping
-legacy_name_map <- c(
-  "mgmt_event_notes" = "mgmt_event_short_notes",
-  "planting_notes" = "mgmt_event_long_notes",
-  "harvest_comments" = "mgmt_event_long_notes",
-  "fertilizer_comments" = "mgmt_event_long_notes",
-  "tillage_notes" = "mgmt_event_long_notes",
-  "chemical_notes" = "mgmt_event_long_notes"
-)
-
-# Helper: get value from legacy field names
 get_legacy_value <- function(values, schema_prop_name) {
   legacy_names <- names(legacy_name_map)[legacy_name_map == schema_prop_name]
   for (ln in legacy_names) {
