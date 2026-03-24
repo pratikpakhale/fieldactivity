@@ -153,7 +153,7 @@ replace_with_display_names <- function(events_with_code_names, language) {
       }
       next
     }
-    
+
     if (element$type == "selectInput") {
       events_with_display_names[[variable_name]] <-
         sapply(events_with_code_names[[variable_name]],

@@ -90,7 +90,6 @@ write_json_file <- function(site, block, event_list, rotation_list,
   if (length(rotation_list) > 0) {
     for (j in 1:length(rotation_list)) {
       rotation_list[[j]]$block <- NULL
-      rotation <- rotation_list[[j]]
     }
   }
   
