@@ -1,6 +1,12 @@
 # Schema interpreter for management-event JSON schema
 # Parses the bundled schema and builds registries for UI generation
 
+# Separator used in property_registry keys to namespace properties by
+# event type and subtype (e.g. "crop_name___planting" or
+# "soil_depth___observation___observation_type_soil").
+# Property names and event/subtype const values must NOT contain this string.
+REGISTRY_KEY_SEP <- "___"
+
 schema_file_path <- function() {
   system.file("extdata", "management-event.schema.json", 
               package = "fieldactivity")
@@ -103,7 +109,7 @@ load_schema <- function() {
                                              event_type = event_const,
                                              is_array_item = FALSE)
           desc$subtype <- sub_const
-          property_registry[[paste0(spn, "___", event_const, "___", sub_const)]] <- desc
+          property_registry[[paste0(spn, REGISTRY_KEY_SEP, event_const, REGISTRY_KEY_SEP, sub_const)]] <- desc
           sub_prop_names <- c(sub_prop_names, spn)
         }
         
@@ -133,7 +139,7 @@ load_schema <- function() {
                                          event_type = event_const,
                                          is_array_item = FALSE)
       # Use a unique key to avoid collision between events sharing property names
-      reg_key <- paste0(pn, "___", event_const)
+      reg_key <- paste0(pn, REGISTRY_KEY_SEP, event_const)
       property_registry[[reg_key]] <- desc
       event_prop_names <- c(event_prop_names, pn)
     }
@@ -149,10 +155,21 @@ load_schema <- function() {
     )
   }
   
+  # Build reverse-lookup index: bare prop_name -> first matching registry key.
+  # Avoids linear scan in find_any_property_desc().
+  property_reverse_index <- list()
+  for (key in names(property_registry)) {
+    bare_name <- sub(paste0(REGISTRY_KEY_SEP, ".*"), "", key)
+    if (is.null(property_reverse_index[[bare_name]])) {
+      property_reverse_index[[bare_name]] <- key
+    }
+  }
+
   list(
     raw = raw,
     event_registry = event_registry,
     property_registry = property_registry,
+    property_reverse_index = property_reverse_index,
     common_properties = common_prop_names,
     event_type_choices = event_type_choices
   )
@@ -432,16 +449,16 @@ schema_get_choices <- function(choices, language) {
 #' @param event_type Event type const (or NULL for common)
 #' @param subtype Subtype const (or NULL)
 #' @return The property descriptor, or NULL
-lookup_property <- function(registry, prop_name, event_type = NULL, 
+lookup_property <- function(registry, prop_name, event_type = NULL,
                             subtype = NULL) {
   # Try subtype-specific key first
   if (!is.null(subtype) && !is.null(event_type)) {
-    key <- paste0(prop_name, "___", event_type, "___", subtype)
+    key <- paste0(prop_name, REGISTRY_KEY_SEP, event_type, REGISTRY_KEY_SEP, subtype)
     if (!is.null(registry[[key]])) return(registry[[key]])
   }
   # Try event-specific key
   if (!is.null(event_type)) {
-    key <- paste0(prop_name, "___", event_type)
+    key <- paste0(prop_name, REGISTRY_KEY_SEP, event_type)
     if (!is.null(registry[[key]])) return(registry[[key]])
   }
   # Try common property
@@ -477,6 +494,3 @@ get_relevant_properties <- function(schema, event_type, subtype = NULL) {
     all = unique(c(common, event_props, subtype_props))
   )
 }
-
-# null-coalescing operator
-`%||%` <- function(a, b) if (!is.null(a)) a else b

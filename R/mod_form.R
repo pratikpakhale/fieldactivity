@@ -127,10 +127,10 @@ mod_form_server <- function(id, site, set_values, reset_values, edit_mode,
     all_props <- get_all_schema_properties(schema)
     for (prop_name in all_props) {
       # Try to find descriptor from any event/subtype context
-      desc <- find_any_property_desc(pr, prop_name)
+      desc <- find_any_property_desc(pr, prop_name, schema$property_reverse_index)
       if (is.null(desc)) next
       if (desc$type %in% c("const", "dataTable")) next
-      
+
       iv <- InputValidator$new()
       added_rules <- FALSE
       
@@ -276,7 +276,7 @@ mod_form_server <- function(id, site, set_values, reset_values, edit_mode,
       # Reset all event properties
       all_props <- get_all_schema_properties(schema)
       for (pn in all_props) {
-        desc <- find_any_property_desc(pr, pn)
+        desc <- find_any_property_desc(pr, pn, schema$property_reverse_index)
         if (!is.null(desc) && !(desc$type %in% c("const", "dataTable"))) {
           clear_schema_value(session, pn, desc)
         }
@@ -663,13 +663,19 @@ mod_form_server <- function(id, site, set_values, reset_values, edit_mode,
   
 }
 
-# Helper: find a property descriptor trying multiple contexts
-find_any_property_desc <- function(pr, prop_name) {
+# Helper: find a property descriptor trying multiple contexts.
+# Uses the reverse index (built in load_schema) for O(1) lookup instead of
+# scanning every registry key.
+find_any_property_desc <- function(pr, prop_name, reverse_index = NULL) {
   # Direct common lookup
   if (!is.null(pr[[prop_name]])) return(pr[[prop_name]])
-  # Search through all keys
+  # Use reverse index if available (O(1) instead of O(n))
+  if (!is.null(reverse_index) && !is.null(reverse_index[[prop_name]])) {
+    return(pr[[reverse_index[[prop_name]]]])
+  }
+  # Fallback: linear scan (for callers without the index)
   for (key in names(pr)) {
-    if (startsWith(key, paste0(prop_name, "___"))) {
+    if (startsWith(key, paste0(prop_name, REGISTRY_KEY_SEP))) {
       return(pr[[key]])
     }
   }

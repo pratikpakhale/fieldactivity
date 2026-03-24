@@ -16,6 +16,8 @@ table_log <- FALSE
 # EDIT: this makes sense also, see datatables API documentation for example
 js_bind_script <- "function() { Shiny.bindAll(this.api().table().node()); }"
 
+# TODO: Move these labels to display_names.csv (or the schema's x-ui) once the
+# CSV gains a Swedish column. Until then, Swedish is hardcoded here.
 schema_table_add_row_label <- function(iso) {
   if (identical(iso, "fi")) {
     "Lis\u00e4\u00e4 rivi"
@@ -644,6 +646,61 @@ mod_table_server <- function(id, row_variable_value,
 
 }
 
+# -- Helpers for mod_table_server_schema ------------------------------------
+
+#' Build a single table cell widget as an HTML string
+#' @noRd
+build_schema_cell_widget <- function(variable, col_desc, ns, iso,
+                                      current_row, value) {
+  code_name <- paste(variable, current_row, sep = "_")
+
+  if (!isTruthy(value) || identical(value, missingval)) value <- ""
+
+  choices <- NULL
+  if (identical(col_desc$type, "selectInput")) {
+    choices <- schema_get_choices(col_desc$choices, iso)
+  }
+
+  placeholder <- NULL
+  if (!is.null(col_desc$placeholders)) {
+    placeholder <- schema_get_title(col_desc$placeholders, iso, "")
+  }
+
+  width <- if (col_desc$type == "numericInput") 100 else NULL
+
+  widget_html <- as.character(
+    render_property_widget(variable, col_desc, ns, iso,
+                            override_code_name = code_name,
+                            override_label = "",
+                            override_value = value,
+                            override_choices = choices,
+                            override_selected = value,
+                            override_placeholder = placeholder,
+                            width = width))
+
+  list(html = widget_html, code_name = code_name)
+}
+
+#' Build a remove-row button as an HTML string
+#' @noRd
+build_remove_row_button <- function(ns, iso, row_idx, can_remove) {
+  as.character(
+    tags$button(
+      type = "button",
+      class = "btn btn-default btn-sm schema-array-table__remove-row",
+      title = schema_table_remove_row_label(iso),
+      `aria-label` = schema_table_remove_row_label(iso),
+      onclick = sprintf(
+        "Shiny.setInputValue('%s', %d, {priority: 'event'})",
+        ns("remove_row_index"),
+        row_idx
+      ),
+      disabled = if (!can_remove) "disabled" else NULL,
+      icon("trash")
+    )
+  )
+}
+
 #' Schema-driven table server module
 #'
 #' @param id Module ID (must match the table_id used in render_array_table)
@@ -793,7 +850,8 @@ mod_table_server_schema <- function(id, array_prop_name, desc, schema,
       session$sendCustomMessage("unbind-table", ns("table"))
     })
 
-    block_sum_calculation <- reactiveVal(FALSE)
+    # Sum calculation for schema tables is handled by the parent form module's
+    # auto-sum observer, not inside the table module itself.
 
     table_data <- reactive({
       override_trigger()
@@ -823,7 +881,6 @@ mod_table_server_schema <- function(id, array_prop_name, desc, schema,
       for (row_idx in rows) {
         for (variable in column_names) {
           col_desc <- columns[[variable]]
-          code_name <- paste(variable, current_row, sep = "_")
 
           value <- if (do_override) {
             override_vals[[variable]][row_idx]
@@ -833,56 +890,19 @@ mod_table_server_schema <- function(id, array_prop_name, desc, schema,
             isolate(old_values())[[variable]][old_row_number]
           }
 
-          if (!isTruthy(value) || identical(value, missingval)) value <- ""
-
-          choices <- NULL
-          if (identical(col_desc$type, "selectInput")) {
-            choices <- schema_get_choices(col_desc$choices, iso)
-          }
-
-          placeholder <- NULL
-          if (!is.null(col_desc$placeholders)) {
-            placeholder <- schema_get_title(col_desc$placeholders, iso, "")
-          }
-
-          width <- if (col_desc$type == "numericInput") 100 else NULL
-
-          widget <- as.character(
-            render_property_widget(variable, col_desc, ns, iso,
-                                    override_code_name = code_name,
-                                    override_label = "",
-                                    override_value = value,
-                                    override_choices = choices,
-                                    override_selected = value,
-                                    override_placeholder = placeholder,
-                                    width = width))
-
-          add_schema_validation_rules(code_name, variable)
-          table_to_display[current_row, variable] <- widget
+          cell <- build_schema_cell_widget(variable, col_desc, ns, iso,
+                                            current_row, value)
+          add_schema_validation_rules(cell$code_name, variable)
+          table_to_display[current_row, variable] <- cell$html
         }
 
-        remove_button <- as.character(
-          tags$button(
-            type = "button",
-            class = "btn btn-default btn-sm schema-array-table__remove-row",
-            title = schema_table_remove_row_label(iso),
-            `aria-label` = schema_table_remove_row_label(iso),
-            onclick = sprintf(
-              "Shiny.setInputValue('%s', %d, {priority: 'event'})",
-              ns("remove_row_index"),
-              row_idx
-            ),
-            disabled = if (!can_remove_rows) "disabled" else NULL,
-            icon("trash")
-          )
-        )
-        table_to_display[current_row, action_column_name] <- remove_button
+        table_to_display[current_row, action_column_name] <-
+          build_remove_row_button(ns, iso, row_idx, can_remove_rows)
 
         rownames(table_to_display)[current_row] <- as.character(row_idx)
         current_row <- current_row + 1
       }
 
-      block_sum_calculation(TRUE)
       override_values(NULL)
       table_to_display
     })
@@ -963,7 +983,6 @@ mod_table_server_schema <- function(id, array_prop_name, desc, schema,
         value_list[[variable]] <- values
       }
 
-      block_sum_calculation(FALSE)
       table_values(value_list)
 
       value_list <- c(value_list, list(DYNAMIC_ROWS = isolate(dynamic_rows())))

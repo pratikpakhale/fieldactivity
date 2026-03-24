@@ -94,55 +94,8 @@ golem_add_external_resources <- function(){
       path = app_sys('app/www'),
       app_title = 'fieldactivity'
     ),
-    tags$style(HTML("
-      .schema-array-table .dataTables_wrapper {
-        margin-bottom: 0;
-        overflow-x: auto;
-      }
-
-      .schema-array-table > br {
-        display: none;
-      }
-
-      .schema-array-table__footer {
-        padding: 12px 0 14px;
-        border-bottom: 1px solid #d9d9d9;
-      }
-
-      .schema-array-table table.dataTable tbody tr:last-child td {
-        border-bottom: none;
-      }
-
-      .schema-array-table__actions-cell {
-        white-space: nowrap;
-        text-align: right;
-        vertical-align: middle !important;
-      }
-
-      .schema-array-table__remove-row {
-        min-width: 36px;
-        padding-left: 10px;
-        padding-right: 10px;
-      }
-
-      .selectize-dropdown {
-        z-index: 2000;
-      }
-
-      .required-asterisk {
-        color: #e74c3c;
-        font-weight: bold;
-      }
-
-      .schema-array-table td {
-        overflow: visible;
-        white-space: normal;
-      }
-
-      .schema-array-table td .selectize-control {
-        min-width: 200px;
-      }
-    ")),
+    tags$link(rel = "stylesheet", type = "text/css",
+              href = "www/schema.css"),
     # Add here other external resources
     # for example, you can add shinyalert::useShinyalert() 
     shinyjs::useShinyjs(),  # enable shinyjs

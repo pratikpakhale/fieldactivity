@@ -5,7 +5,11 @@
 # path to json file folder
 json_file_base_folder <- function() golem::get_golem_options("json_file_path")
 
-# Schema URL added to every saved event
+# LIFECYCLE: This URL is embedded in every persisted event JSON file as "$schema".
+# When bumping the schema version or moving the schema repository, update this
+# value AND consider backward-compatibility for files already written with the
+# old URL.  Coordinate changes with write_json_file() below and any external
+# consumers that validate events against this schema.
 schema_url <- "https://raw.githubusercontent.com/hamk-uas/fieldobservatory-data-schemas/main/management-event.schema.json"
 
 # Legacy property name mapping for backward-compatible reading
@@ -73,6 +77,7 @@ write_json_file <- function(site, block, event_list, rotation_list,
       
       # if the event type is fertilizer application and the fertilizer
       # type is organic, change mgmt_operations_event to organic_material
+      # to conform to the ICASA standard
       if (identical(event$mgmt_operations_event, "fertilizer") &&
           identical(event$fertilizer_type, "fertilizer_type_organic")) {
         event_list[[i]]$mgmt_operations_event <- "organic_material"    
@@ -174,10 +179,17 @@ normalize_legacy_event <- function(event) {
 }
 
 #' Copy a file related to an event and name it appropriately
-#' 
+#'
 #' When a file (image) is uploaded through a fileInput widget, it is saved to a
 #' temporary folder. This function copies that file to an appropriate directory
-#' and name.
+#' and name. The file does not have to be originally in a temporary folder —
+#' any file path is valid. This allows the function to also be used when cloning
+#' an event and its associated images need to be duplicated.
+#'
+#' @details The new file name has the format
+#'   `yyyy-mm-dd_site_block_variable_name_#.ext` where `#` is an incrementing
+#'   number (0, 1, 2, ...) to ensure uniqueness within the target folder.
+#'
 #' @param orig_filepath The path of the file to copy
 #' @param variable_name Which variable is this file for? E.g. canopeo_image
 #' @param site The site where the event took place
@@ -223,6 +235,7 @@ copy_file <- function(orig_filepath, variable_name, site, block, date,
       break
     }
     number <- number + 1
+    # don't loop forever
     if (number >= 1000) {
       stop("Could not find a unique name for the file")
     }

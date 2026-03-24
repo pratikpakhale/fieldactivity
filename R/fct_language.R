@@ -105,7 +105,8 @@ replace_with_display_names <- function(events_with_code_names, language) {
     
     # If not in structure_lookup_list, try schema property registry
     if (is.null(element$type)) {
-      desc <- find_any_property_desc(mgmt_schema$property_registry, variable_name)
+      desc <- find_any_property_desc(mgmt_schema$property_registry, variable_name,
+                                      mgmt_schema$property_reverse_index)
       if (!is.null(desc)) {
         wtype <- desc$type
         if (wtype == "selectInput") {
